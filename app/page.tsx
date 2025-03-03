@@ -1,9 +1,9 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-// Remove or use the Camera import
-// import { Camera } from "lucide-react";
+// Remove unused Camera import
 import { Card } from "@/components/ui/card";
+import Image from "next/image"; // Import Next.js Image component
 
 interface ClassificationResult {
   halal: boolean;
@@ -40,8 +40,29 @@ export default function Home() {
   useEffect(() => {
     // Check camera permission when component mounts
     checkCameraPermission();
-    // Add checkCameraPermission to dependency array to fix the warning
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Disabling because we only want to run this once on mount
   }, []);
+
+  // Function to start camera
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (error) {
+      console.error("Error starting camera:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (cameraAccess) {
+      startCamera();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Disabling because we only want to run this when cameraAccess changes
+  }, [cameraAccess]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -155,7 +176,15 @@ export default function Home() {
             
             {preview && (
               <div className="mt-4">
-                <img src={preview} alt="Preview" className="w-full rounded-md" />
+                {/* Replace img with Next.js Image component */}
+                <div className="relative w-full h-64">
+                  <Image 
+                    src={preview} 
+                    alt="Preview of selected food label" 
+                    fill
+                    className="object-contain rounded-md"
+                  />
+                </div>
                 <Button 
                   onClick={uploadImage}
                   className="w-full mt-2"
