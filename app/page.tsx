@@ -1,284 +1,200 @@
 "use client";
+import React, { useState, useEffect, useRef } from "react";
+import { Button } from "@/components/ui/button";
+// Remove or use the Camera import
+// import { Camera } from "lucide-react";
+import { Card } from "@/components/ui/card";
 
-import { useState, useRef, useEffect } from "react";
-import { RefreshCcw, Zap, Check, Image, Camera, CameraOff } from "lucide-react";
-import axios from "axios";
+interface ClassificationResult {
+  halal: boolean;
+  haram: boolean;
+  vegan: boolean;
+  vegetarian: boolean;
+}
 
-export default function CameraApp() {
-  const [image, setImage] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [cameraFacing, setCameraFacing] = useState("user");
-  const [flash, setFlash] = useState(false);
-  const [result, setResult] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-  const [resultVisible, setResultVisible] = useState(false);
-  const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
+export default function Home() {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [result, setResult] = useState<string | null>(null);
+  const [classification, setClassification] = useState<ClassificationResult | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [cameraAccess, setCameraAccess] = useState<boolean>(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isMounted, setIsMounted] = useState(false);
 
-  // Only run client-side code after component is mounted
-  useEffect(() => {
-    setIsMounted(true);
-    checkCameraPermission();
-    
-    // Check if device is mobile
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth <= 768);
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    
-    return () => {
-      window.removeEventListener('resize', checkMobile);
-    };
-  }, []);
-
-  // Check camera permission
+  // Function to check camera permissions
   const checkCameraPermission = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: cameraFacing },
-      });
-      
-      if (stream) {
-        setCameraPermission(true);
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
-        }
-      }
-    } catch (err) {
-      console.error("Error accessing camera", err);
-      setCameraPermission(false);
-    }
-  };
-
-  // Start camera only after component is mounted and when cameraFacing changes
-  useEffect(() => {
-    if (isMounted && cameraPermission) {
-      startCamera();
-    }
-  }, [cameraFacing, isMounted, cameraPermission]);
-
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: cameraFacing },
-      });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      setCameraAccess(true);
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
       }
-    } catch (err) {
-      console.error("Error accessing camera", err);
-      setCameraPermission(false);
+    } catch (error) {
+      console.error("Camera access denied:", error);
+      setCameraAccess(false);
     }
   };
 
-  const captureImage = () => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+  useEffect(() => {
+    // Check camera permission when component mounts
+    checkCameraPermission();
+    // Add checkCameraPermission to dependency array to fix the warning
+  }, []);
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    canvas.toBlob((blob) => {
-      if (blob) {
-        const capturedImage = new File([blob], "camera-capture.jpg", {
-          type: "image/jpeg",
-        });
-        setImage(capturedImage);
-        setImagePreview(URL.createObjectURL(blob));
-      }
-    }, "image/jpeg");
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      setImage(file);
-      setImagePreview(URL.createObjectURL(file));
+      setSelectedFile(file);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
-  const submitImage = async () => {
-    if (!image) return;
+  const captureFromCamera = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
+      
+      if (context) {
+        // Set canvas dimensions to match video
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        
+        // Draw video frame to canvas
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Convert canvas to blob
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const file = new File([blob], "camera-capture.jpg", { type: "image/jpeg" });
+            setSelectedFile(file);
+            setPreview(canvas.toDataURL("image/jpeg"));
+          }
+        }, "image/jpeg");
+      }
+    }
+  };
+
+  const uploadImage = async () => {
+    if (!selectedFile) return;
+
     setLoading(true);
-    setResultVisible(false);
+    setResult(null);
+    setClassification(null);
+
     const formData = new FormData();
-    formData.append("file", image);
+    formData.append("file", selectedFile);
+
     try {
-      const response = await axios.post("https://clearbyte-backend-render.onrender.com/upload", formData);
-      setResult(response.data);
-      setResultVisible(true);
+      const response = await fetch("https://food-classifier-backend.onrender.com/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+      setResult(data.text);
+      setClassification(data.classification);
     } catch (error) {
-      console.error("Upload failed", error);
+      console.error("Error uploading image:", error);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen w-full bg-gray-910">
-      {/* Main Container - Phone-like layout on desktop */}
-      <div 
-        className={`relative overflow-hidden bg-[#111111] ${isMobile ? 'w-full h-screen' : 'w-[375px] h-[750px]'} shadow-2xl`}
-        style={{
-          borderRadius: isMobile ? '0' : '32px',
-          boxShadow: isMobile ? 'none' : '0 0 40px rgba(0, 0, 0, 0.6), 0 0 100px rgba(0, 0, 0, 0.4)'
-        }}
-      >
-        {/* Video Feed */}
-        <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
-          {cameraPermission && (
-            <video ref={videoRef} autoPlay playsInline className="absolute w-full h-full object-cover" />
-          )}
-          {cameraPermission === false && (
-            <div 
-              className="absolute inset-0 flex flex-col items-center justify-center"
-              style={{
-                background: "rgba(0, 0, 0, 0.7)",
-                backdropFilter: "blur(10px)"
-              }}
+    <main className="flex min-h-screen flex-col items-center p-4 md:p-24">
+      <h1 className="text-3xl font-bold mb-6">Food Classification</h1>
+      
+      <div className="flex flex-col w-full max-w-xl gap-4">
+        {/* Input image section */}
+        <Card className="p-4">
+          <h2 className="text-xl font-semibold mb-4">Upload Food Label Image</h2>
+          
+          <div className="flex flex-col gap-4">
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+            />
+            
+            <Button 
+              onClick={() => fileInputRef.current?.click()}
+              variant="outline"
+              className="w-full"
             >
-              <CameraOff className="w-16 h-16 text-white opacity-60 mb-4" />
-              <p className="text-white text-lg font-medium">Camera access denied</p>
-              <p className="text-gray-400 mt-2 max-w-xs text-center">
-                Please allow camera access in your browser settings to use this feature
-              </p>
-              <button 
-                onClick={checkCameraPermission}
-                className="mt-6 bg-white text-black px-6 py-2 rounded-lg"
-              >
-                Try Again
-              </button>
+              Select Image
+            </Button>
+            
+            {cameraAccess && (
+              <div className="relative w-full mt-2">
+                <video 
+                  ref={videoRef}
+                  autoPlay 
+                  playsInline
+                  className="w-full rounded-md"
+                />
+                <Button 
+                  onClick={captureFromCamera}
+                  className="absolute bottom-2 left-1/2 transform -translate-x-1/2"
+                >
+                  Capture
+                </Button>
+                <canvas ref={canvasRef} className="hidden" />
+              </div>
+            )}
+            
+            {preview && (
+              <div className="mt-4">
+                <img src={preview} alt="Preview" className="w-full rounded-md" />
+                <Button 
+                  onClick={uploadImage}
+                  className="w-full mt-2"
+                  disabled={loading}
+                >
+                  {loading ? "Processing..." : "Analyze"}
+                </Button>
+              </div>
+            )}
+          </div>
+        </Card>
+        
+        {/* Results section */}
+        {result && classification && (
+          <Card className="p-4">
+            <h2 className="text-xl font-semibold mb-4">Results</h2>
+            
+            <div className="grid grid-cols-2 gap-2">
+              <div className={`p-2 rounded ${classification.halal ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                Halal: {classification.halal ? "Yes" : "No"}
+              </div>
+              <div className={`p-2 rounded ${classification.haram ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+                Haram: {classification.haram ? "Yes" : "No"}
+              </div>
+              <div className={`p-2 rounded ${classification.vegan ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                Vegan: {classification.vegan ? "Yes" : "No"}
+              </div>
+              <div className={`p-2 rounded ${classification.vegetarian ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                Vegetarian: {classification.vegetarian ? "Yes" : "No"}
+              </div>
             </div>
-          )}
-          <canvas ref={canvasRef} className="hidden" />
-        </div>
-
-        {/* Top Logo Area with Gradient */}
-        <div 
-          className="absolute top-0 left-0 right-0 h-24 flex items-center justify-center"
-          style={{
-            background: "linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0) 100%)",
-            zIndex: 10
-          }}
-        >
-          {/* Logo placeholder - replace src with your actual logo path */}
-          <img 
-            src="/ClearByte.png" 
-            alt="ClearByte Logo" 
-            className="h-6.5" 
-          />
-        </div>
-
-        {/* Top Controls */}
-        {cameraPermission && (
-          <div className="absolute top-6 flex justify-between w-full px-6 z-10">
-            {/* Flash Button */}
-            <button
-              onClick={() => setFlash(!flash)}
-              style={{
-                background: "rgba(255, 255, 255, 0.2)",
-                backdropFilter: "blur(10px)",
-                border: "1px solid rgba(255, 255, 255, 0.3)",
-              }}
-              className="p-3 rounded-full shadow-md"
-            >
-              <Zap className={`w-7 h-7 ${flash ? "text-yellow-500" : "text-white"}`} />
-            </button>
-
-            {/* Switch Camera */}
-            <button
-              onClick={() => setCameraFacing(cameraFacing === "user" ? "environment" : "user")}
-              style={{
-                background: "rgba(255, 255, 255, 0.2)",
-                backdropFilter: "blur(10px)",
-                border: "1px solid rgba(255, 255, 255, 0.3)",
-              }}
-              className="p-3 rounded-full shadow-md"
-            >
-              <RefreshCcw className="w-7 h-7 text-white" />
-            </button>
-          </div>
-        )}
-
-        {/* Glassmorphic Controls */}
-        {cameraPermission && (
-          <div
-            className="absolute bottom-6 flex items-center justify-between w-[340px] h-[100px] p-4 rounded-full shadow-lg mx-auto left-0 right-0 z-10"
-            style={{
-              background: "rgba(255, 255, 255, 0.2)",
-              backdropFilter: "blur(14px)",
-              border: "1px solid rgba(255, 255, 255, 0.3)",
-            }}
-          >
-            {/* Image Upload Button */}
-            <div className="relative w-16 h-16 rounded-full flex items-center justify-center bg-white bg-opacity-30 shadow-md overflow-hidden cursor-pointer">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                className="absolute inset-0 opacity-0 cursor-pointer"
-              />
-              {imagePreview ? (
-                <img src={imagePreview} alt="Captured" className="w-full h-full object-cover rounded-full" />
-              ) : (
-                <Image className="w-8 h-8 text-gray-400" />
-              )}
+            
+            <div className="mt-4">
+              <h3 className="font-medium">Extracted Text:</h3>
+              <p className="text-sm mt-1 p-2 bg-gray-100 rounded">{result}</p>
             </div>
-
-            {/* Shutter Button */}
-            <button onClick={captureImage} className="relative flex items-center justify-center w-18 h-18 rounded-full border-[4px] border-white bg-white shadow-lg">
-              <div className="absolute w-[99%] h-[99%] bg-white rounded-full border-[2px] border-gray-400"></div>
-            </button>
-
-            {/* Submit Button */}
-            <button
-              onClick={submitImage}
-              style={{
-                background: "rgba(255, 255, 255, 0.2)",
-                backdropFilter: "blur(10px)",
-                border: "1px solid rgba(255, 255, 255, 0.3)",
-              }}
-              className="p-3 rounded-full shadow-md"
-              disabled={loading || !image}
-            >
-              <Check className={`w-8 h-8 ${loading ? "text-gray-400" : "text-white"}`} />
-            </button>
-          </div>
-        )}
-
-        {/* Sliding Result Panel */}
-        {resultVisible && (
-          <div
-            className="absolute bottom-0 w-full bg-white bg-opacity-80 backdrop-blur-lg rounded-t-3xl p-6 shadow-lg transition-transform duration-300 transform translate-y-0 z-20"
-            style={{ transform: resultVisible ? 'translateY(0)' : 'translateY(100%)' }}
-          >
-            <h2 className="text-lg font-semibold text-gray-700 mb-4">Analysis Result</h2>
-            <pre className="text-gray-600 whitespace-pre-wrap">{JSON.stringify(result, null, 2)}</pre>
-            <button onClick={() => setResultVisible(false)} className="mt-4 bg-blue-600 text-white px-6 py-2 rounded-lg w-full">
-              Close
-            </button>
-          </div>
+          </Card>
         )}
       </div>
-      
-      {/* Desktop-only instructions */}
-      {!isMobile && (
-        <div className="fixed bottom-6 text-gray-400 text-center max-w-md px-4">
-          <p>Use this camera interface to capture and analyze images</p>
-        </div>
-      )}
-    </div>
+    </main>
   );
 }
